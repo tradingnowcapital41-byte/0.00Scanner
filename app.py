@@ -1,26 +1,26 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import time
 
-# स्टॉक्सची यादी (तुमच्या गरजेनुसार)
+# स्टॉक्सची यादी
 stocks = ["GLENMARK.NS", "PAYTM.NS", "IREDA.NS", "CONCOR.NS", "TATATECH.NS", "DIXON.NS", "SUZLON.NS", "RVNL.NS"]
 
-st.set_page_config(page_title="Pharma2Tech Live Scanner", layout="wide")
-st.title("🚀 Live Strategy Scanner - Auto Refresh")
+st.set_page_config(page_title="Live Scanner", layout="wide")
+st.title("🚀 Live Strategy Scanner")
 
-if 'signals' not in st.session_state:
-    st.session_state.signals = pd.DataFrame()
+# रिफ्रेश बटण
+if st.button("🔄 Refresh Data"):
+    st.rerun()
 
-def run_scanner():
-    data_list = []
+def get_data():
+    all_data = []
     for symbol in stocks:
         try:
             df = yf.download(symbol, period="1d", interval="5m", progress=False)
             if df.empty: continue
             
-            c1 = df.iloc[0] # पहिली ५ मिनिटांची कॅन्डल
-            curr = df['Close'].iloc[-1] # आताची किंमत
+            c1 = df.iloc[0]
+            curr = df['Close'].iloc[-1]
             
             # लॉजिक: Open=Low (Buy)
             if c1['Open'] <= c1['Low'] * 1.001:
@@ -31,24 +31,12 @@ def run_scanner():
                 elif curr >= t2: status = '🎯 T2 HIT'
                 elif curr >= t1: status = '🟢 T1 HIT'
                 
-                data_list.append({'Stock': symbol, 'Type': 'BUY', 'Entry': round(c1['High'],2), 'SL': round(c1['Low'],2), 'Target1': round(t1,2), 'Target2': round(t2,2), 'Current': round(curr,2), 'Status': status})
+                all_data.append({'Stock': symbol, 'Type': 'BUY', 'Entry': round(c1['High'],2), 'SL': round(c1['Low'],2), 'Target1': round(t1,2), 'Target2': round(t2,2), 'Current': round(curr,2), 'Status': status})
         except: continue
-    return pd.DataFrame(data_list)
+    return pd.DataFrame(all_data)
 
-# Auto-Refresh Logic
-placeholder = st.empty()
-
-while True:
-    with placeholder.container():
-        df_results = run_scanner()
-        if not df_results.empty:
-            st.table(df_results)
-            # Alert for Hits
-            hits = df_results[df_results['Status'] != 'Active']
-            for _, row in hits.iterrows():
-                st.toast(f"{row['Stock']} : {row['Status']} @ {row['Current']}")
-        else:
-            st.write("सध्या सिग्नल स्कॅन होत आहेत...")
-            
-    time.sleep(30) # दर ३० सेकंदाला अपडेट
-    st.rerun()
+df = get_data()
+if not df.empty:
+    st.table(df)
+else:
+    st.write("डेटा लोड होत आहे किंवा मार्केट बंद आहे...")
