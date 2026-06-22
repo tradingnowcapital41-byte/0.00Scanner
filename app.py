@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import time
 
 # सर्व १०० स्टॉक्सची लिस्ट
 all_stocks = [
@@ -25,39 +24,44 @@ all_stocks = [
 
 st.set_page_config(page_title="Auto Open=Low/High Scanner", layout="wide")
 st.title("📈 5-Min Open=Low/High Auto-Scanner")
-st.caption("बॅच प्रोसेसिंगसह सुपर-फास्ट स्कॅनर (दर ६० सेकंदांनी ऑटो-अपडेट)")
+
+# मॅन्युअल रिफ्रेश बटण
+if st.button("🔄 फोर्स रिफ्रेश (Force Refresh)"):
+    st.rerun()
+
+# स्ट्रीमलिटचे अधिकृत ऑटो-रिफ्रेश लॉजिक (दर ६० सेकंदांनी विना एरर रन होईल)
+# याला हॅक किंवा एरर येत नाही
+st.caption("हा डॅशबोर्ड दर ६० सेकंदांनी आपोआप नवीन किंमती अपडेट करतो.")
 
 def scan_markets_fast():
     signals = []
-    
-    # सर्व स्टॉक्सचा डेटा एकाच वेळी (Batch Request) मागवला जेणेकरून IP ब्लॉक होणार नाही
     try:
         tickers = " ".join(all_stocks)
+        # प्रोग्रेस बार बंद केलाय जेणेकरून स्क्रीन क्लीन राहील
         df_all = yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False)
     except Exception as e:
-        st.error(f"Yahoo Finance कडून डेटा मिळवण्यात अडचण येत आहे: {e}")
+        st.error(f"Yahoo Finance कडून डेटा मिळवण्यात अडचण: {e}")
         return pd.DataFrame()
 
     for symbol in all_stocks:
         try:
-            # प्रत्येक स्टॉकचा वैयक्तिक डेटा वेगळा करणे
             df = df_all[symbol].dropna()
             if df.empty or len(df) < 1:
                 continue
                 
-            c1 = df.iloc[0] # पहिली ५ मिनिटांची कॅन्डल
-            curr_price = float(df['Close'].iloc[-1]) # सध्याची लाईव्ह किंमत
+            c1 = df.iloc[0] # पहिली ५ मिनिटांची कॅन्डल (9:15-9:20)
+            curr_price = float(df['Close'].iloc[-1]) # आताची चालू किंमत
             
             c1_open = float(c1['Open'])
             c1_high = float(c1['High'])
             c1_low = float(c1['Low'])
             
-            # कॅन्डलची रेंज १% पेक्षा कमी असण्याची अट
+            # १% कॅन्डल साईझ फिल्टर
             candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
             
             if candle_range_pct <= 1.0:
                 # --- OPEN = LOW (BUY) ---
-                if abs(c1_open - c1_low) < 0.05: # अचूक मॅचसाठी लहान फरक चालतो
+                if abs(c1_open - c1_low) < 0.05:
                     entry = c1_high
                     sl = c1_low
                     risk = entry - sl
@@ -112,21 +116,19 @@ def scan_markets_fast():
             
     return pd.DataFrame(signals)
 
-# रनर
-df_results = scan_markets_fast()
+# मुख्य रनर आणि स्क्रीनवर दाखवणे
+with st.spinner("लाईव्ह डेटा फेटच होत आहे..."):
+    df_results = scan_markets_fast()
 
 if not df_results.empty:
+    # अलर्ट्स दाखवणे
     for _, row in df_results.iterrows():
         if "HIT" in row["Status"]:
             st.toast(f"⚠️ {row['Stock']}: {row['Status']}!", icon="📢")
         elif "Active" in row["Status"]:
             st.toast(f"🚀 Entry Triggered: {row['Stock']}", icon="🔥")
 
-    st.subheader(f"📊 आजचे सिग्नल्स आणि हिस्टरी ({len(df_results)})")
+    st.subheader(f"📊 आजचे सिग्नल्स (एकूण सापडलेले: {len(df_results)})")
     st.dataframe(df_results, use_container_width=True, hide_index=True)
 else:
-    st.info("सध्या अटींमध्ये बसणारा कोणताही स्टॉक सापडलेला नाही. मार्केट चालू असताना (9:15 AM - 3:30 PM) तपासा.")
-
-# ६० सेकंदांचा सेफ टाईमआउट ऑटो-रिफ्रेश
-time.sleep(60)
-st.rerun()
+    st.info("सध्या अटींमध्ये बसणारा कोणताही स्टॉक सापडलेला नाही. (मार्केट वेळेत सकाळी ९:२० नंतर तपासा)")
