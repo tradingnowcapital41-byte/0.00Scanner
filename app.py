@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # List of 100 NSE Stocks
 all_stocks = [
@@ -22,7 +24,7 @@ all_stocks = [
     "OIL.NS", "BSE.NS", "COFORGE.NS", "BHARATFORG.NS", "PIIND.NS", "SOLARINDS.NS", "BDL.NS"
 ]
 
-# 1. UI Configuration
+# 1. Premium Cyberpunk Dark UI
 st.set_page_config(page_title="Ultra Fast Algo Terminal", layout="wide")
 
 st.markdown("""
@@ -37,116 +39,113 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.markdown("<div class='main-title'>⚡ ULTRA-FAST INTRADAY ALGO TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>High-Speed 5-Min Open=Low/High Scanner | Zero-Load Architecture</div>", unsafe_allow_html=True)
-
-# 2. Safe HTML Refresh (Does not block the server)
-# It injects a tiny JavaScript refresh every 60000ms (60 seconds)
-st.components.v1.html(
-    "<script>parent.window.location.reload();</script>",
-    height=0, width=0
-)
+st.markdown("<div class='sub-title'>Multi-Threaded 5-Min Open=Low/High Scanner | Optimized Performance</div>", unsafe_allow_html=True)
 
 if 'history_log' not in st.session_state:
     st.session_state.history_log = pd.DataFrame()
 
-# 3. Super-Fast Batch Data Processor
-@st.cache_data(ttl=30)  # 30 seconds caching prevents yfinance IP ban
-def fetch_and_scan():
-    signals = []
+# 2. Parallel Processing Engine (High Speed)
+def process_single_stock(symbol, df_all):
+    try:
+        df = df_all[symbol].dropna()
+        if df.empty or len(df) < 1:
+            return None
+            
+        c1 = df.iloc[0] 
+        curr_price = float(df['Close'].iloc[-1]) 
+        c1_open, c1_high, c1_low = float(c1['Open']), float(c1['High']), float(c1['Low'])
+        
+        candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
+        if candle_range_pct > 1.0:
+            return None
+            
+        # BUY Logic
+        if abs(c1_open - c1_low) < 0.05:
+            entry, sl = c1_high, c1_low
+            risk = entry - sl
+            t1, t2 = entry + risk, entry + (risk * 1.5)
+            status = "🎯 Pending"
+            if curr_price >= entry:
+                status = "🟢 Active Trade"
+                if curr_price <= sl: status = "🔴 SL HIT"
+                elif curr_price >= t2: status = "🎯 T2 HIT"
+                elif curr_price >= t1: status = "✅ T1 HIT"
+                    
+            return {
+                "Stock": symbol.replace(".NS", ""), "Type": "⚡ BUY (O=L)",
+                "Entry Price": round(entry, 2), "StopLoss": round(sl, 2),
+                "Target 1 (1:1)": round(t1, 2), "Target 2 (1:1.5)": round(t2, 2),
+                "Current Price": round(curr_price, 2), "Status": status
+            }
+            
+        # SELL Logic
+        elif abs(c1_open - c1_high) < 0.05:
+            entry, sl = c1_low, c1_high
+            risk = sl - entry
+            t1, t2 = entry - risk, entry - (risk * 1.5)
+            status = "🎯 Pending"
+            if curr_price <= entry:
+                status = "🟢 Active Trade"
+                if curr_price >= sl: status = "🔴 SL HIT"
+                elif curr_price <= t2: status = "🎯 T2 HIT"
+                elif curr_price <= t1: status = "✅ T1 HIT"
+                    
+            return {
+                "Stock": symbol.replace(".NS", ""), "Type": "💥 SELL (O=H)",
+                "Entry Price": round(entry, 2), "StopLoss": round(sl, 2),
+                "Target 1 (1:1)": round(t1, 2), "Target 2 (1:1.5)": round(t2, 2),
+                "Current Price": round(curr_price, 2), "Status": status
+            }
+    except:
+        return None
+
+@st.cache_data(ttl=45) # Cache data for 45 seconds to drastically reduce server load
+def get_market_data():
     try:
         tickers = " ".join(all_stocks)
-        # Fetching everything linearly is 10x faster than MultiIndex grouping on Cloud
-        df_all = yf.download(tickers, period="1d", interval="5m", progress=False, timeout=8)
-        if df_all.empty:
-            return pd.DataFrame()
+        return yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False, timeout=10)
     except:
+        return None
+
+def scan_markets_fast():
+    df_all = get_market_data()
+    if df_all is None or df_all.empty:
         return pd.DataFrame()
-
-    for symbol in all_stocks:
-        try:
-            # Clean extraction without MultiIndex overhead
-            open_series = df_all['Open'][symbol].dropna()
-            high_series = df_all['High'][symbol].dropna()
-            low_series = df_all['Low'][symbol].dropna()
-            close_series = df_all['Close'][symbol].dropna()
-
-            if open_series.empty:
-                continue
-
-            c1_open = float(open_series.iloc[0])
-            c1_high = float(high_series.iloc[0])
-            c1_low = float(low_series.iloc[0])
-            curr_price = float(close_series.iloc[-1])
-
-            candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
-            if candle_range_pct > 1.0:
-                 Kakontinue
-            
-            clean_name = symbol.replace(".NS", "")
-
-            # BUY Logic
-            if abs(c1_open - c1_low) < 0.05:
-                entry, sl = c1_high, c1_low
-                risk = entry - sl
-                t1, t2 = entry + risk, entry + (risk * 1.5)
-                status = "🎯 Pending"
-                if curr_price >= entry:
-                    status = "🟢 Active"
-                    if curr_price <= sl: status = "🔴 SL HIT"
-                    elif curr_price >= t2: status = "🎯 T2 HIT"
-                    elif curr_price >= t1: status = "✅ T1 HIT"
-
-                signals.append({
-                    "Stock": clean_name, "Type": "⚡ BUY (O=L)",
-                    "Entry": round(entry, 2), "StopLoss": round(sl, 2),
-                    "Target 1": round(t1, 2), "Target 2": round(t2, 2),
-                    "Current": round(curr_price, 2), "Status": status
-                })
-
-            # SELL Logic
-            elif abs(c1_open - c1_high) < 0.05:
-                entry, sl = c1_low, c1_high
-                risk = sl - entry
-                t1, t2 = entry - risk, entry - (risk * 1.5)
-                status = "🎯 Pending"
-                if curr_price <= entry:
-                    status = "🟢 Active"
-                    if curr_price >= sl: status = "🔴 SL HIT"
-                    elif curr_price <= t2: status = "🎯 T2 HIT"
-                    elif curr_price <= t1: status = "✅ T1 HIT"
-
-                signals.append({
-                    "Stock": clean_name, "Type": "💥 SELL (O=H)",
-                    "Entry": round(entry, 2), "StopLoss": round(sl, 2),
-                    "Target 1": round(t1, 2), "Target 2": round(t2, 2),
-                    "Current": round(curr_price, 2), "Status": status
-                })
-        except:
-            continue
+        
+    # Multi-threading for instantaneous calculations
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(lambda s: process_single_stock(s, df_all), all_stocks)
+        
+    signals = [r for r in results if r is not None]
     return pd.DataFrame(signals)
 
-df_results = fetch_and_scan()
+# Run fast engine
+df_results = scan_markets_fast()
 
 if not df_results.empty:
     st.session_state.history_log = df_results.copy()
 
-# 4. Two-Panel Layout
+# 3. Clean Dual Dashboard UI Layout
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
     st.subheader("⚡ Live Market Dashboard")
     if not df_results.empty:
-        df_live_only = df_results[df_results['Status'].isin(["🟢 Active", "🎯 Pending"])]
+        df_live_only = df_results[df_results['Status'].isin(["🟢 Active Trade", "🎯 Pending"])]
         if not df_live_only.empty:
             st.dataframe(df_live_only, use_container_width=True, hide_index=True)
         else:
-            st.info("No active breakout setups currently.")
+            st.info("No active trades running at this second.")
     else:
-        st.info("No stocks matched the criteria yet.")
+        st.info("Looking for price breakout setups...")
 
 with col_right:
     st.subheader("📚 Daily History Summary Log")
     if not st.session_state.history_log.empty:
         st.dataframe(st.session_state.history_log, use_container_width=True, hide_index=True)
     else:
-        st.info("No history log captured for today yet.")
+        st.info("No signals captured yet today.")
+
+# 4. Smart Non-blocking Sleep
+time.sleep(60)
+st.rerun()
