@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import time
 
-# १. सर्व स्टॉक्सची लिस्ट (NTPCGREEN आणि इतर सर्व समाविष्ट)
+# सर्व १०० स्टॉक्सची लिस्ट
 all_stocks = [
     "GLENMARK.NS", "PAYTM.NS", "PREMIERENE.NS", "PRESTIGE.NS", "IREDA.NS", "CONCOR.NS", 
     "WAAREEENER.NS", "MOTILALOFS.NS", "NATIONALUM.NS", "NYKAA.NS", "POLYCAB.NS", "IDEA.NS", 
@@ -23,41 +23,41 @@ all_stocks = [
     "OIL.NS", "BSE.NS", "COFORGE.NS", "BHARATFORG.NS", "PIIND.NS", "SOLARINDS.NS", "BDL.NS"
 ]
 
-# २. पेज सेटअप
 st.set_page_config(page_title="Auto Open=Low/High Scanner", layout="wide")
 st.title("📈 5-Min Open=Low/High Auto-Scanner")
-st.caption("हा स्कॅनर दर ६० सेकंदांनी ऑटोमॅटिक रेंडर होतो आणि टारगेट/SL ट्रॅक करतो.")
+st.caption("बॅच प्रोसेसिंगसह सुपर-फास्ट स्कॅनर (दर ६० सेकंदांनी ऑटो-अपडेट)")
 
-# ३. ऑटो रिफ्रेश सेटिंग (दर ६० सेकंदांनी पेज रिफ्रेश होईल - क्रॅश न होता)
-if "run_count" not in st.session_state:
-    st.session_state.run_count = 0
-st.session_state.run_count += 1
-
-# ४. मुख्य स्कॅनिंग फंक्शन
-def scan_markets():
+def scan_markets_fast():
     signals = []
     
+    # सर्व स्टॉक्सचा डेटा एकाच वेळी (Batch Request) मागवला जेणेकरून IP ब्लॉक होणार नाही
+    try:
+        tickers = " ".join(all_stocks)
+        df_all = yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False)
+    except Exception as e:
+        st.error(f"Yahoo Finance कडून डेटा मिळवण्यात अडचण येत आहे: {e}")
+        return pd.DataFrame()
+
     for symbol in all_stocks:
         try:
-            # ५ मिनिटांचा आजचा डेटा फेटच करणे
-            df = yf.download(symbol, period="1d", interval="5m", progress=False)
+            # प्रत्येक स्टॉकचा वैयक्तिक डेटा वेगळा करणे
+            df = df_all[symbol].dropna()
             if df.empty or len(df) < 1:
                 continue
                 
             c1 = df.iloc[0] # पहिली ५ मिनिटांची कॅन्डल
-            curr_price = df['Close'].iloc[-1] # सध्याची लाईव्ह किंमत
+            curr_price = float(df['Close'].iloc[-1]) # सध्याची लाईव्ह किंमत
             
             c1_open = float(c1['Open'])
             c1_high = float(c1['High'])
             c1_low = float(c1['Low'])
-            c1_close = float(c1['Close'])
             
-            # कॅन्डलची रेंज १% पेक्षा कमी असावी ही अट
+            # कॅन्डलची रेंज १% पेक्षा कमी असण्याची अट
             candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
             
             if candle_range_pct <= 1.0:
-                # --- OPEN = LOW (BUY STRATEGY) ---
-                if c1_open == c1_low:
+                # --- OPEN = LOW (BUY) ---
+                if abs(c1_open - c1_low) < 0.05: # अचूक मॅचसाठी लहान फरक चालतो
                     entry = c1_high
                     sl = c1_low
                     risk = entry - sl
@@ -65,15 +65,11 @@ def scan_markets():
                     t2 = entry + (risk * 1.5)
                     
                     status = "🎯 Pending (High break ची वाट पाहत आहे)"
-                    # जर सध्याची किंमत हायच्या वर गेली असेल तर एंट्री ट्रिगर झाली
                     if curr_price >= entry:
                         status = "🟢 Active Trade"
-                        if curr_price <= sl:
-                            status = "🔴 SL HIT"
-                        elif curr_price >= t2:
-                            status = "🎯 TARGET 2 HIT"
-                        elif curr_price >= t1:
-                            status = "✅ TARGET 1 HIT"
+                        if curr_price <= sl: status = "🔴 SL HIT"
+                        elif curr_price >= t2: status = "🎯 TARGET 2 HIT"
+                        elif curr_price >= t1: status = "✅ TARGET 1 HIT"
                             
                     signals.append({
                         "Stock": symbol.replace(".NS", ""),
@@ -86,8 +82,8 @@ def scan_markets():
                         "Status": status
                     })
                 
-                # --- OPEN = HIGH (SELL STRATEGY) ---
-                elif c1_open == c1_high:
+                # --- OPEN = HIGH (SELL) ---
+                elif abs(c1_open - c1_high) < 0.05:
                     entry = c1_low
                     sl = c1_high
                     risk = sl - entry
@@ -97,12 +93,9 @@ def scan_markets():
                     status = "🎯 Pending (Low break ची वाट पाहत आहे)"
                     if curr_price <= entry:
                         status = "🟢 Active Trade"
-                        if curr_price >= sl:
-                            status = "🔴 SL HIT"
-                        elif curr_price <= t2:
-                            status = "🎯 TARGET 2 HIT"
-                        elif curr_price <= t1:
-                            status = "✅ TARGET 1 HIT"
+                        if curr_price >= sl: status = "🔴 SL HIT"
+                        elif curr_price <= t2: status = "🎯 TARGET 2 HIT"
+                        elif curr_price <= t1: status = "✅ TARGET 1 HIT"
                             
                     signals.append({
                         "Stock": symbol.replace(".NS", ""),
@@ -114,32 +107,26 @@ def scan_markets():
                         "Current Price": round(curr_price, 2),
                         "Status": status
                     })
-        except Exception as e:
+        except:
             continue
             
     return pd.DataFrame(signals)
 
-# ५. डेटा रेंडरिंग
-with st.spinner("लाईव्ह मार्केट डेटा स्कॅन होत आहे... कृपया थांबा..."):
-    df_results = scan_markets()
+# रनर
+df_results = scan_markets_fast()
 
-# ६. डिस्प्ले आणि पॉप-अप अलर्ट्स
 if not df_results.empty:
-    # पॉप-अप अलर्ट्स (Toast Notifications) साठी लूप
     for _, row in df_results.iterrows():
         if "HIT" in row["Status"]:
-            st.toast(f"⚠️ {row['Stock']} चा {row['Status']} झालाय! Price: {row['Current Price']}", icon="📢")
+            st.toast(f"⚠️ {row['Stock']}: {row['Status']}!", icon="📢")
         elif "Active" in row["Status"]:
-            st.toast(f"🚀 Entry Triggered: {row['Stock']} ({row['Type']}) at {row['Entry Price']}", icon="🔥")
+            st.toast(f"🚀 Entry Triggered: {row['Stock']}", icon="🔥")
 
-    # मुख्य डॅशबोर्ड टेबल
-    st.subheader(f"📊 आजचे सिग्नल्स आणि हिस्टरी (एकूण सापडलेले: {len(df_results)})")
-    
-    # स्टेटस नुसार रंगांचे कस्टमायझेशन सोपे जावे म्हणून टेबल दाखवणे
+    st.subheader(f"📊 आजचे सिग्नल्स आणि हिस्टरी ({len(df_results)})")
     st.dataframe(df_results, use_container_width=True, hide_index=True)
 else:
-    st.info("सध्याच्या ५ मिनिटांच्या पहिल्या कॅन्डलमध्ये कोणतीही Open=Low किंवा Open=High ची स्थिती (१% च्या आत) सापडलेली नाही.")
+    st.info("सध्या अटींमध्ये बसणारा कोणताही स्टॉक सापडलेला नाही. मार्केट चालू असताना (9:15 AM - 3:30 PM) तपासा.")
 
-# ७. ऑटो-रिफ्रेश करण्यासाठी बॅकएंड टाईमर ट्रिक (क्रॅश प्रूफ)
+# ६० सेकंदांचा सेफ टाईमआउट ऑटो-रिफ्रेश
 time.sleep(60)
 st.rerun()
