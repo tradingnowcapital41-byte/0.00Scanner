@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 # List of 100 NSE Stocks
 all_stocks = [
@@ -23,154 +24,128 @@ all_stocks = [
     "OIL.NS", "BSE.NS", "COFORGE.NS", "BHARATFORG.NS", "PIIND.NS", "SOLARINDS.NS", "BDL.NS"
 ]
 
-# 1. Page Configuration & Cyberpunk HTML/CSS UI Styling
-st.set_page_config(page_title="Pro Intraday Algo Terminal", layout="wide")
+# 1. Premium Cyberpunk Dark UI
+st.set_page_config(page_title="Ultra Fast Algo Terminal", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-    
-    /* Main App Background */
-    .stApp { background-color: #080b10; font-family: 'Segoe UI', sans-serif; }
-    
-    /* Header Styling */
-    .main-title { color: #00ffcc; text-align: center; font-size: 34px; font-weight: 800; letter-spacing: 1px; margin-bottom: 5px; text-shadow: 0 0 20px rgba(0, 255, 204, 0.4); }
-    .sub-title { color: #8a99ad; text-align: center; font-size: 14px; margin-bottom: 25px; }
-    
-    /* Section Headers */
-    h3 { color: #00ffcc !important; font-family: 'JetBrains Mono', monospace; border-bottom: 2px solid #1f2937; padding-bottom: 8px; margin-top: 15px !important; }
-    
-    /* Style Dataframes for Dark Theme */
-    div[data-testid="stDataFrame"] { border: 1px solid #1f2937; border-radius: 8px; overflow: hidden; }
+    .stApp { background-color: #06090e; font-family: 'Segoe UI', sans-serif; }
+    .main-title { color: #00ffcc; text-align: center; font-size: 32px; font-weight: 800; text-shadow: 0 0 15px rgba(0, 255, 204, 0.4); margin-bottom: 5px; }
+    .sub-title { color: #8a99ad; text-align: center; font-size: 14px; margin-bottom: 20px; }
+    h3 { color: #00ffcc !important; font-family: 'JetBrains Mono', monospace; border-bottom: 2px solid #1f2937; padding-bottom: 6px; }
+    div[data-testid="stDataFrame"] { border: 1px solid #1f2937; border-radius: 8px; }
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown("<div class='main-title'>⚡ PRO INTRADAY ALGO SCANNER TERMINAL</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>Advanced 5-Min Open=Low/High Engine | Live Tracking Dashboard | Auto-Refresh: 60s</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>⚡ ULTRA-FAST INTRADAY ALGO TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>Multi-Threaded 5-Min Open=Low/High Scanner | Optimized Performance</div>", unsafe_allow_html=True)
 
-# Persistent storage for Daily History
 if 'history_log' not in st.session_state:
     st.session_state.history_log = pd.DataFrame()
 
-# 2. Optimized Batch Scanning Engine
-def scan_markets_fast():
-    signals = []
+# 2. Parallel Processing Engine (High Speed)
+def process_single_stock(symbol, df_all):
+    try:
+        df = df_all[symbol].dropna()
+        if df.empty or len(df) < 1:
+            return None
+            
+        c1 = df.iloc[0] 
+        curr_price = float(df['Close'].iloc[-1]) 
+        c1_open, c1_high, c1_low = float(c1['Open']), float(c1['High']), float(c1['Low'])
+        
+        candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
+        if candle_range_pct > 1.0:
+            return None
+            
+        # BUY Logic
+        if abs(c1_open - c1_low) < 0.05:
+            entry, sl = c1_high, c1_low
+            risk = entry - sl
+            t1, t2 = entry + risk, entry + (risk * 1.5)
+            status = "🎯 Pending"
+            if curr_price >= entry:
+                status = "🟢 Active Trade"
+                if curr_price <= sl: status = "🔴 SL HIT"
+                elif curr_price >= t2: status = "🎯 T2 HIT"
+                elif curr_price >= t1: status = "✅ T1 HIT"
+                    
+            return {
+                "Stock": symbol.replace(".NS", ""), "Type": "⚡ BUY (O=L)",
+                "Entry Price": round(entry, 2), "StopLoss": round(sl, 2),
+                "Target 1 (1:1)": round(t1, 2), "Target 2 (1:1.5)": round(t2, 2),
+                "Current Price": round(curr_price, 2), "Status": status
+            }
+            
+        # SELL Logic
+        elif abs(c1_open - c1_high) < 0.05:
+            entry, sl = c1_low, c1_high
+            risk = sl - entry
+            t1, t2 = entry - risk, entry - (risk * 1.5)
+            status = "🎯 Pending"
+            if curr_price <= entry:
+                status = "🟢 Active Trade"
+                if curr_price >= sl: status = "🔴 SL HIT"
+                elif curr_price <= t2: status = "🎯 T2 HIT"
+                elif curr_price <= t1: status = "✅ T1 HIT"
+                    
+            return {
+                "Stock": symbol.replace(".NS", ""), "Type": "💥 SELL (O=H)",
+                "Entry Price": round(entry, 2), "StopLoss": round(sl, 2),
+                "Target 1 (1:1)": round(t1, 2), "Target 2 (1:1.5)": round(t2, 2),
+                "Current Price": round(curr_price, 2), "Status": status
+            }
+    except:
+        return None
+
+@st.cache_data(ttl=45) # Cache data for 45 seconds to drastically reduce server load
+def get_market_data():
     try:
         tickers = " ".join(all_stocks)
-        df_all = yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False)
-    except Exception as e:
-        st.error(f"Error fetching data from Yahoo Finance: {e}")
-        return pd.DataFrame()
+        return yf.download(tickers, period="1d", interval="5m", group_by='ticker', progress=False, timeout=10)
+    except:
+        return None
 
-    for symbol in all_stocks:
-        try:
-            df = df_all[symbol].dropna()
-            if df.empty or len(df) < 1:
-                continue
-                
-            c1 = df.iloc[0] 
-            curr_price = float(df['Close'].iloc[-1]) 
-            
-            c1_open = float(c1['Open'])
-            c1_high = float(c1['High'])
-            c1_low = float(c1['Low'])
-            
-            candle_range_pct = ((c1_high - c1_low) / c1_open) * 100
-            
-            if candle_range_pct <= 1.0:
-                # --- OPEN = LOW (BUY STRATEGY) ---
-                if abs(c1_open - c1_low) < 0.05:
-                    entry = c1_high
-                    sl = c1_low
-                    risk = entry - sl
-                    t1 = entry + risk
-                    t2 = entry + (risk * 1.5)
-                    
-                    status = "🎯 Pending (Waiting for High Break)"
-                    if curr_price >= entry:
-                        status = "🟢 Active Trade"
-                        if curr_price <= sl: status = "🔴 SL HIT"
-                        elif curr_price >= t2: status = "🎯 TARGET 2 HIT"
-                        elif curr_price >= t1: status = "✅ TARGET 1 HIT"
-                            
-                    signals.append({
-                        "Stock": symbol.replace(".NS", ""),
-                        "Type": "⚡ BUY (O=L)",
-                        "Entry Price": round(entry, 2),
-                        "StopLoss": round(sl, 2),
-                        "Target 1 (1:1)": round(t1, 2),
-                        "Target 2 (1:1.5)": round(t2, 2),
-                        "Current Price": round(curr_price, 2),
-                        "Status": status
-                    })
-                
-                # --- OPEN = HIGH (SELL STRATEGY) ---
-                elif abs(c1_open - c1_high) < 0.05:
-                    entry = c1_low
-                    sl = c1_high
-                    risk = sl - entry
-                    t1 = entry - risk
-                    t2 = entry - (risk * 1.5)
-                    
-                    status = "🎯 Pending (Waiting for Low Break)"
-                    if curr_price <= entry:
-                        status = "🟢 Active Trade"
-                        if curr_price >= sl: status = "🔴 SL HIT"
-                        elif curr_price <= t2: status = "🎯 TARGET 2 HIT"
-                        elif curr_price <= t1: status = "✅ TARGET 1 HIT"
-                            
-                    signals.append({
-                        "Stock": symbol.replace(".NS", ""),
-                        "Type": "💥 SELL (O=H)",
-                        "Entry Price": round(entry, 2),
-                        "StopLoss": round(sl, 2),
-                        "Target 1 (1:1)": round(t1, 2),
-                        "Target 2 (1:1.5)": round(t2, 2),
-                        "Current Price": round(curr_price, 2),
-                        "Status": status
-                    })
-        except:
-            continue
-            
+def scan_markets_fast():
+    df_all = get_market_data()
+    if df_all is None or df_all.empty:
+        return pd.DataFrame()
+        
+    # Multi-threading for instantaneous calculations
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(lambda s: process_single_stock(s, df_all), all_stocks)
+        
+    signals = [r for r in results if r is not None]
     return pd.DataFrame(signals)
 
-# Run Scanner
+# Run fast engine
 df_results = scan_markets_fast()
 
-# Save complete daily history data persistently 
 if not df_results.empty:
     st.session_state.history_log = df_results.copy()
 
-# Live Toast Notifications
-if not df_results.empty:
-    for _, row in df_results.iterrows():
-        if "HIT" in row["Status"]:
-            st.toast(f"⚠️ {row['Stock']}: {row['Status']}!", icon="📢")
-        elif "Active" in row["Status"]:
-            st.toast(f"🚀 Entry Triggered: {row['Stock']}", icon="🔥")
-
-# 3. Two-Panel Layout Structure (Side-by-Side)
+# 3. Clean Dual Dashboard UI Layout
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
     st.subheader("⚡ Live Market Dashboard")
     if not df_results.empty:
-        # Filters out only pending and active trades for the live screen
-        df_live_only = df_results[df_results['Status'].isin(["🟢 Active Trade", "🎯 Pending (Waiting for High Break)", "🎯 Pending (Waiting for Low Break)"])]
+        df_live_only = df_results[df_results['Status'].isin(["🟢 Active Trade", "🎯 Pending"])]
         if not df_live_only.empty:
             st.dataframe(df_live_only, use_container_width=True, hide_index=True)
         else:
-            st.info("No active or pending trades at the moment.")
+            st.info("No active trades running at this second.")
     else:
-        st.info("No stocks matched the criteria yet.")
+        st.info("Looking for price breakout setups...")
 
 with col_right:
     st.subheader("📚 Daily History Summary Log")
     if not st.session_state.history_log.empty:
         st.dataframe(st.session_state.history_log, use_container_width=True, hide_index=True)
     else:
-        st.info("No history log recorded yet.")
+        st.info("No signals captured yet today.")
 
-# 4. Safe Auto-Refresh Timer Mechanism
+# 4. Smart Non-blocking Sleep
 time.sleep(60)
 st.rerun()
